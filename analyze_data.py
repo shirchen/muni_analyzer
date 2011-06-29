@@ -127,8 +127,6 @@ def get_data(dict_):
     print "==== Collecting starting runs from %s to %s ===="\
      % (str(time.ctime(epoch_from)), str(time.ctime(epoch_to)))
     tmp_list_i = []
-#    for x in db.location.find({ "lat": {"$gte" :37.7604 }, "lat": {"$lte": 37.7606},  "lon":{"$lte":-122.38},"lon":{"$gte":-122.39}, "cur_time": {"$gte": 1299526830}, "bus_id": "5444"}):
-#    for x in db.location.find({ "$or": [ {"dir": "22_IB2"}, {"$dir" : "22_OB2"} ], "lat": {"$lte": 37.7606}, "lat": {"$gte" :37.7604 }, "lon":{"$lte":-122.38},"lon":{"$gte":-122.39}}):
     for x in db.location.find({"lat": {"$gte" :37.7604, "$lte": 37.7606},
                                "lon":{"$lte":-122.38, "$gte":-122.39},
                                "cur_time": {"$gte": epoch_from, 
@@ -136,11 +134,7 @@ def get_data(dict_):
         tmp_list_i.append(x)
     
     tmp_list = []
-#for x in db.location.find({ "$or": [ {"dir": "22_IB2"}, {"$dir" : "22_OB2"} ], "lat": {"$lte": 37.8025}, "lat": {"$gte" :37.801 }, "lon":{"$lte":-122.4362},"lon":{"$gte":-122.4368 }}):
-# cur_time condition for captured data after monday
     print "=== Collecting end runs from %s to %s ====" % (str(time.ctime(epoch_from)), str(time.ctime(epoch_to_adjusted)))
-#    for x in db.location.find({"lat": {"$lte": 37.8025}, "lat": {"$gte" :37.801 },  "lon":{"$lte":-122.4362},"lon":{"$gte":-122.4368 }, "cur_time": {"$gte": 1299526830}}):
-#    for x in db.location.find({"lat": {"$lte": 37.8025}, "lat": {"$gte" :37.801 },  "lon":{"$lte":-122.4362},"lon":{"$gte":-122.4368 }, "cur_time": {"$gte": 1299526830}, "bus_id": "5444"}):
     for x in db.location.find({"lat": {"$lte": 37.8025, "$gte" :37.801 },
                                 "lon":{"$lte":-122.4362, "$gte":-122.4368 },
                                 "cur_time": {"$gte": epoch_from,
