@@ -1,10 +1,85 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+'''
+Created on Jun 30, 2011
+
+@author: dima
+
+Analyzes accumulated Muni data
+ 
+Arguments:
+    
+'''
+
 import datetime
+import logging
 import os
 import pymongo
 import socket
 import time
 import _mysql
+from collections import defaultdict
 
+class Analyze(object):
+    mysql_password = None
+    
+    def __init__(self):
+        self.logging = False
+
+    def get_mysql_password(self):
+        file = open(os.path.expanduser("~/.mysql_password"))
+        mysql_password = file.readlines()[0].strip('\n')
+        self.mysql_password = mysql_password
+        return mysql_password
+
+    def retrieve_schedule(self):
+        """
+        Retrieves SF Muni timetable data
+        Input: 
+            mysql_password        password to MySQL instance 
+        Output:
+            dictionary {trip_id: [departure_time, arrival_time]}
+            
+        TODO: 
+            cache this information when rerunning similar queries 
+        Notes:
+        mysql select statement's output will look like:
+        +----------------+---------------+---------+
+        | departure_time | stop_sequence | trip_id |
+        +----------------+---------------+---------+
+        | 21:28:00       |             1 | 4128319 |
+        | 22:06:00       |            45 | 4128319 |
+        | 22:28:00       |             1 | 4128320 |
+        | 23:05:00       |            45 | 4128320 |
+    
+        """
+        hostname = socket.gethostname()
+        query_times = "select st.departure_time, st.stop_sequence, st.trip_id" +\
+        " from stop_times st join trips t using (trip_id)" +\
+        " where t.route_id='6011' and t.service_id='1' and t.direction_id='1'" +\
+        " and (st.stop_sequence = '1' or st.stop_sequence = '45')" +\
+        " order by trip_id asc;" 
+        print type(query_times)
+        print query_times
+        if self.logging:
+            logging.info("Running mysql query: %s", query_times)
+        if hostname == 'domU-12-31-39-09-C5-9A':
+            conn = _mysql.connect(user="takingawalk", passwd="sheandhim", db="muni")
+        else:
+            self.get_mysql_password()
+            conn = _mysql.connect(host="ec2-50-16-77-90.compute-1.amazonaws.com",
+                                   user="takingawalk", 
+                                   passwd=self.mysql_password,
+                                   db="muni")
+        conn.query(query_times)
+        res = conn.store_result()
+        rows = res.fetch_row(maxrows=0)
+        trips = defaultdict(list)
+        for row in rows:
+            departure_time = row[0]
+            trip_id = row[2]
+            trips[trip_id].append(departure_time)
+        return trips
 
 # Helpers
 
@@ -24,6 +99,18 @@ def convert_to_epoch_time(a_time, tm_year, tm_mon, tm_mday):
 
 def get_schedule_data(cand_secs, dict_, tm_mon, tm_mday):
     """
+    Provides best approximation of closest departing and arrival times given
+    an epoch time
+    Input: 
+        cand_secs        epoch time (secs)
+        dict_            dictionary containing schedules for a route
+        tm_mon            month which we are analyzing
+        tm_mday            day in the month which we are analyzing
+    
+    Output:
+        list containing best guess at starting and ending time with a route_id 
+        
+    Issues:
         How to approximate the time the bus should have left
         Assume that all buses leave late, so find the first scheduled
             leave time after the candidate and return the previous
@@ -78,40 +165,15 @@ def get_schedule_data(cand_secs, dict_, tm_mon, tm_mday):
             start = epoch_times_start[i-1]
             end, route_id = dict_times[start]
             break
-    return [start,end, route_id]
-    
-"""
-    Retrieving schedule for the 22. Route_id is hard coded as well as beginning and end stops.
-    TODO: cache this information when rerunning similar queries 
-"""
-
-def retrieve_schedule():
-    hostname = socket.gethostname()
-    
-    query_times = """select st.departure_time, st.stop_sequence, st.trip_id from stop_times st join trips t using (trip_id) where t.route_id='6011' and t.service_id='1' and t.direction_id='1' and (st.stop_sequence = '1' or st.stop_sequence = '45') order by trip_id asc;"""
-    
-    if hostname == 'domU-12-31-39-09-C5-9A':
-        conn = _mysql.connect(user="takingawalk", passwd="sheandhim", db="muni")
-    else:
-        conn = _mysql.connect(host="ec2-50-16-77-90.compute-1.amazonaws.com", user="takingawalk", passwd="sheandhim", db="muni")
-        
-    conn.query(query_times)
-    res = conn.store_result()
-    rows = res.fetch_row(maxrows=0)
-
-    dict_ = {}
-    
-    for x in rows:
-        if x[2] not in dict_:
-            dict_[x[2]] = []
-            dict_[x[2]].append(x[0])
-        else:
-            dict_[x[2]].append(x[0])
-
-    return dict_
+    return [start, end, route_id]
 
     
 def get_data(dict_):
+    """
+    Extracts GPS coordinates from MongoDB
+    Input:
+    Output:
+    """
     epoch_from = 1301641200
     epoch_to = epoch_from+60*60*24
     # letting runs finish for 2 more hours
@@ -126,22 +188,17 @@ def get_data(dict_):
     
     print "==== Collecting starting runs from %s to %s ===="\
      % (str(time.ctime(epoch_from)), str(time.ctime(epoch_to)))
-    tmp_list_i = []
-    for x in db.location.find({"lat": {"$gte" :37.7604, "$lte": 37.7606},
+
+    c_start = db.location.find({"lat": {"$gte" :37.7604, "$lte": 37.7606},
                                "lon":{"$lte":-122.38, "$gte":-122.39},
                                "cur_time": {"$gte": epoch_from, 
-                                            "$lte":epoch_to}}):
-        tmp_list_i.append(x)
+                                            "$lte":epoch_to}})
     
-    tmp_list = []
-    print "=== Collecting end runs from %s to %s ====" % (str(time.ctime(epoch_from)), str(time.ctime(epoch_to_adjusted)))
-    for x in db.location.find({"lat": {"$lte": 37.8025, "$gte" :37.801 },
+    c_end = db.location.find({"lat": {"$lte": 37.8025, "$gte" :37.801 },
                                 "lon":{"$lte":-122.4362, "$gte":-122.4368 },
                                 "cur_time": {"$gte": epoch_from,
-                                              "$lte":epoch_to_adjusted}}):
-        tmp_list.append(x)
-        
-    return tmp_list_i, tmp_list
+                                              "$lte":epoch_to_adjusted}})
+    return c_start, c_end
 
 
 """
@@ -206,13 +263,12 @@ def process_data(dict_start_time, dict_end_time):
                 [schd_epoch_start, schd_epoch_end, route_id] =\
                  get_schedule_data(start_time, dict_, tm_mon, tm_mday)
                 print "====" + str(time.ctime(start_time)) + "==== for route id: " + str(route_id)
-                print "==== %d "  "==== for route id: %d" % \
+                print "==== %s "  "==== for route id: %s" % \
                 (time.ctime(start_time), route_id)
                 if schd_epoch_start > 0:
                     lateness = start_time-schd_epoch_start
                     if lateness > 0:
-                        print "Leaving late by: %s " 
-                        "when should have left at %s"\
+                        print "Leaving late by: %s when should have left at %s"\
                         % (str(datetime.timedelta(seconds=int(lateness))),
                          str(time.ctime(schd_epoch_start)))
                     else:
@@ -266,14 +322,18 @@ def process_data(dict_start_time, dict_end_time):
     print "number of routes not found: %d" % (num_not_found)
 
 if __name__ == "__main__":
+        LOG_FILENAME = '/tmp/Muni.out'
+        logging.basicConfig(filename=LOG_FILENAME,level=logging.INFO)
         os.environ['TZ'] = 'US/Pacific'
         time.tzset()
         start = time.time()
-        dict_ = retrieve_schedule()
+#        dict_ = retrieve_schedule(mysql_password)
+        analyze = Analyze()
+        dict_ = analyze.retrieve_schedule()
+        
         print "====finished retrieving mysql schedule"
-    #get_schedule_data()    
         list_start, list_end = get_data(dict_)
-        print "==== starting to massage data ====" 
+        print "==== starting to massage data ===="
         dict_start = massage_data(list_start, True)
         dict_end = massage_data(list_end, False)
         print "==== starting processing data ===="

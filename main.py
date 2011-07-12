@@ -12,11 +12,10 @@ import os
 
 class MuniMain(object):
     
-    def __init__(self, str_route):
-        self.str_route = str_route
-#        self.str_mainDir = '/mnt/ashkelon/muni'
-        self.str_mainDir = '/Users/shirchen/muni'
-        self.str_baseHttpCall = 'http://webservices.nextbus.com/service/publicXMLFeed?'
+    def __init__(self, route):
+        self.route = route
+        self.base_directory = '/Users/shirchen/muni'
+        self.base_http_nextbus = 'http://webservices.nextbus.com/service/publicXMLFeed?'
         self.str_mongoServer = 'ec2-50-16-77-90.compute-1.amazonaws.com'
     
     def setup(self):
@@ -24,6 +23,6 @@ class MuniMain(object):
         """
             Setup directory structure
         """
-        if not os.path.isdir(self.str_mainDir):
-            os.makedirs(self.str_mainDir)
+        if not os.path.isdir(self.base_directory):
+            os.makedirs(self.base_directory)
         

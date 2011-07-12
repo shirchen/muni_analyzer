@@ -29,7 +29,7 @@ class Arrival(MuniMain):
     def __init__(self, str_route):
 # shirchen (05/16/10): I dont like what I am doing on the line below
         MuniMain.__init__(self, str_route)
-        self.str_dir = os.path.join(self.str_mainDir, 'arrival')
+        self.str_dir = os.path.join(self.base_directory, 'arrival')
         self.l_stops = []
         self.dict_titleToStop = {}
 
@@ -40,7 +40,7 @@ class Arrival(MuniMain):
             and run predictions for all stops defined on a route
         """
         
-        str_call = self.str_baseHttpCall +'command=predictionsForMultiStops&a=sf-muni' 
+        str_call = self.base_http_nextbus +'command=predictionsForMultiStops&a=sf-muni' 
         
         for str_stop in self.l_stops:
             str_call = str_call + '&stops=%s|null|%s' % (self.str_route, str_stop)

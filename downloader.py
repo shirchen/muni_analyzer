@@ -8,9 +8,9 @@ Created on Feb 14, 2010
 Downloads vehicle location by latitude and longitude
 
 Arguments:
-    -t, time=    check for new data every t seconds
+    -l, logging  enable logging to /tmp/Muni.out
     -r, route=   route number
-
+    -t, time=    check for new data every t seconds
 '''
 
 import getopt
@@ -30,43 +30,44 @@ Class to store one line of Muni data that comes in
 
 class Downloader(MuniMain):
 
-    def __init__(self, str_route):
-# shirchen (05/16/10): I dont like what I am doing on the line below
-        MuniMain.__init__(self, str_route)
-        self.str_dir = os.path.join(self.str_mainDir,'location')
+    def __init__(self, route):
+        MuniMain.__init__(self, route)
+        self.directory = os.path.join(self.base_directory,'location')
+        self.logging = False
         
-    def downloadData(self):
         
+    def download_location(self):
         '''
         Getting data for the past so many minutes. 0 => 15 minutes
         1144953500233 -- was tmp placeholder
-        
         '''
-        str_call = self.str_baseHttpCall + 'command=vehicleLocations&a=sf-muni&r=%s&t=%s'\
-         % (self.str_route, '0')
+        http_location_call = self.base_http_nextbus\
+         + 'command=vehicleLocations&a=sf-muni&r=%s&t=%s'\
+         % (self.route, '0')
         http = httplib2.Http("")
         try:
-            http_resp, str_content = http.request(str_call, "GET")
-            self.parseRouteData(str_content)
+            http_resp, content = http.request(http_location_call, "GET")
+            self.parse_location_data(content)
 
         except Exception, e:
-            print 'Could not make call %s, got exception: %s' % (str_call, str(e))
-        
+            print 'Could not make call %s, got exception: %s' % (http_location_call, str(e))
+    """
+    At first, I was storing data into files, but now MongoDB is used 
+    """    
     def writeDataToFile(self, coord):
-        str_fileName = os.path.join(self.str_dir, self.str_route, time.strftime("%Y%m%d-%H"))        
+        str_fileName = os.path.join(self.directory, self.route,
+                                     time.strftime("%Y%m%d-%H"))        
         file_w = open(str_fileName, 'a+')    
-
-        tmp_str_line = '\t'.join(coord.bus_id, coord.float_lat, coord.float_lon, coord.dir_tag) + '\n' 
-                    
-        file_w.write(tmp_str_line)
-            
+        line = '\t'.join(coord.bus_id, coord.float_lat, coord.float_lon,
+                                  coord.dir_tag) + '\n' 
+        file_w.write(line)
         file_w.close()
 
-    def parseRouteData(self, str_data):
-        doc = xml.dom.pulldom.parseString(str_data)
-        str_routeDir = os.path.join(self.str_dir, self.str_route)
-        if not os.path.isdir(str_routeDir):
-            os.makedirs(str_routeDir)
+    def parse_location_data(self, xml_response):
+        doc = xml.dom.pulldom.parseString(xml_response)
+        route_directory = os.path.join(self.directory, self.route)
+        if not os.path.isdir(route_directory):
+            os.makedirs(route_directory)
         try:
             for event, node in doc:
                 if event == 'START_ELEMENT' and node.nodeName == 'vehicle':
@@ -77,18 +78,20 @@ class Downloader(MuniMain):
                     str_lon = node.getAttribute("lon")
                     str_leadVhclID = node.getAttribute("leadingVehicleId")
                     str_secsSinceReport = node.getAttribute("secsSinceReport")
-                    
-#                    logging.info("Time: %s, Id: %s, Route: %s, DirTag: %s, Lat: %s, Lon: %s,Leading ID: %s, Out of date: %s"\
-#                      %(time.ctime(), str_id, str_routeTag, str_dirTag, str_lat, str_lon, str_leadVhclID,\
-#                        str_secsSinceReport))
+                    if self.logging:
+                        logging.info("Time: %s, Id: %s, Route: %s, DirTag: %s,"
+                         "Lat: %s, Lon: %s,Leading ID: %s, Out of date: %s"\
+                          %(time.ctime(), str_id, str_routeTag, str_dirTag,
+                             str_lat, str_lon, str_leadVhclID,
+                              str_secsSinceReport))
                     try:
-                        coord = Coordinates(time.time(), str_id, float(str_lat), float(str_lon), str_dirTag, self.str_route)
+                        coord = Coordinates(time.time(), str_id, 
+                                            float(str_lat), float(str_lon),
+                                             str_dirTag, self.route)
                         self.uploadToMongo(coord)
                     except:
                         print 'Exception when creating object:' + sys.exc_info()[0]
                         raise 
-                        
-                     
         except Exception:
             print 'Exception:' + sys.exc_info()[0]
             raise 
@@ -98,8 +101,8 @@ class Downloader(MuniMain):
     """
     def uploadToMongo(self, coord):
         conn = pymongo.Connection(self.str_mongoServer)
-        db = conn.muni_database
-        location = db.location
+        db = conn.muni_database # picking muni_database db
+        location = db.location  # picking the collection to insert data into
         coordinate = {"route": coord.route,\
                        "bus_id": coord.bus_id,\
                        "cur_time": coord.cur_time,\
@@ -107,49 +110,62 @@ class Downloader(MuniMain):
                        "lon": coord.float_lon,\
                        "dir": coord.dir_tag}
         location.insert(coordinate)
+
+# Helpers
+def usage():
+    print """
+Arguments:
+    -l, logging  enable logging to /tmp/Muni.out
+    -r, route=   route number
+    -t, time=    check for new data every t seconds
+    """
         
 if __name__=="__main__":
-    
     LOG_FILENAME = '/tmp/Muni.out'
     logging.basicConfig(filename=LOG_FILENAME,level=logging.INFO)
-    
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hr:t:v", ["help", "route=", "time="])
+        opts, args = getopt.getopt(sys.argv[1:], "hlp:r:t:v",
+                                    ["help", "logging", "period=" "route=", "time="])
     except getopt.GetoptError, err:
         # print help information and exit:
-        print str(err) # will print something like "option -a not recognized"
-#        usage()
+        print "Error: " + str(err) # will print something like "option -a not recognized"
+        usage()
         sys.exit(2)
     route = None
     verbose = False
-    
-    bool_continuous = False
+    continuous = False
+    to_log = False
+    num_hours_to_collect = 0
+    time_at_start = time.time()
     for o, a in opts:
         if o == "-v":
             verbose = True
         elif o in ("-h", "--help"):
 #            usage()
             sys.exit()
+        elif o in ("-p", "--period"):
+            num_hours_to_collect = float(a)    
+        elif o in ("-l", "--logging"):
+            to_log = True
         elif o in ("-r", "--route"):
-            str_route = a
+            route = a
         elif o in ("-t", "--time"):
             int_interval = int(a)
-            bool_continuous = True
+            continuous = True
         else:
             assert False, "unhandled option"
-    
-#    str_routesSplit = str_routes.split(',')
-    
-    muniDownloader = Downloader(str_route)
-
-    if bool_continuous:
+    muniDownloader = Downloader(route)
+    muniDownloader.logging = to_log
+    if continuous and num_hours_to_collect == 0:
         while 1:
-    #        for t_str_route in str_routesSplit:
-            
-            muniDownloader.downloadData()
-                
+            muniDownloader.download_location()
             time.sleep(int_interval)
-            
+    elif num_hours_to_collect > 0:
+        num_secs_to_collect = num_hours_to_collect * 3600
+        stoppage_time = time_at_start+num_secs_to_collect
+        print "Collecting until %s" % (time.ctime(stoppage_time))
+        while time.time() < stoppage_time:
+            muniDownloader.download_location()
+            time.sleep(int_interval)
     else:
-        
-        muniDownloader.downloadData()
+        muniDownloader.download_location()
