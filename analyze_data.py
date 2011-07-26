@@ -55,12 +55,14 @@ class Output(object):
 class Analyze(object):
     mysql_password = None
     
+
     def __init__(self):
         self.to_log = False
         self.mysql_host = "ec2-50-18-72-59.us-west-1.compute.amazonaws.com"
         self.mysql_local_hostname = 'ip-10-170-26-73'
         self.start_bus_ids_to_times = defaultdict(list)
         self.end_bus_ids_to_times = defaultdict(list)
+        self.LEAST_TIME_TO_DO_ROUNDTRIP = 50*60
         
     def get_mysql_password(self):
         file = open(os.path.expanduser("~/.mysql_password"))
@@ -95,7 +97,7 @@ class Analyze(object):
         " from stop_times st join trips t using (trip_id)" +\
         " where t.route_id='6011' and t.service_id='1' and t.direction_id='1'" +\
         " and (st.stop_sequence = '1' or st.stop_sequence = '45')" +\
-        " order by trip_id asc;" 
+        " order by trip_id, stop_sequence asc;" 
         print "running sql query: " + query_times
         self.get_mysql_password()        
         if self.to_log:
@@ -121,7 +123,9 @@ class Analyze(object):
             """ 
             d_hour, d_min, d_sec = departure_time.split(':')
             if int(d_hour) > 23:
-                    departure_time = ':'.join([str(int(d_hour)-24), d_min, d_sec])
+                    departure_time = ':'.join([str(int(d_hour)-24),
+                                               d_min, 
+                                               d_sec])
             trip_id = row[2]
             trips[trip_id].append(departure_time)
         # Now let's organize the dictionary in proper order
@@ -141,34 +145,34 @@ class Analyze(object):
         """
         epoch_from = 1301641200
         epoch_to = epoch_from+60*60*24
-        # letting runs finish for 2 more hours
-        # ideally, want to make this a function of time from schedule plus some variation, like 1 hour just in case 
+        """
+         letting runs finish for 2 more hours
+         ideally, want to make this a function of time from schedule plus some
+        variation, like 1 hour just in case
+        """ 
         epoch_to_adjusted = epoch_to + 7200
         conn = connect_to_mongo()
         db = conn.muni
         
         print "==== Collecting starting runs from %s to %s ===="\
          % (str(time.ctime(epoch_from)), str(time.ctime(epoch_to)))
-    
-    #    db = conn.muni_database
-    #    c_start = db.location.find({"lat": {"$gte" :37.7604, "$lte": 37.7606},
-    #                               "lon":{"$lte":-122.38, "$gte":-122.39},
-    #                               "cur_time": {"$gte": epoch_from, 
-    #                                            "$lte":epoch_to}})
-    #    
-    #    c_end = db.location.find({"lat": {"$lte": 37.8025, "$gte" :37.801 },
-    #                                "lon":{"$lte":-122.4362, "$gte":-122.4368 },
-    #                                "cur_time": {"$gte": epoch_from,
-    #                                              "$lte":epoch_to_adjusted}})
         """
-        > db.location.find({loc:{$within:{$center:[[37.80241, -122.4364],0.01]}}})
-        > db.location.find({loc:{$within:{$center:[[37.76048, -122.38895],0.002]}}})
+        > db.location.find({loc:{$within:{$center:[[37.80241, -122.4364],
+        0.01]}}})
+        > db.location.find({loc:{$within:{$center:[[37.76048, -122.38895],
+        0.002]}}})
         """
         bus_ids = db.location.distinct("bus_id")
         for bus_id in bus_ids:
-            c_start = db.location.find({"bus_id":bus_id,"loc":{"$within":{"$center":[[37.76048, -122.38895],0.002]}}}).sort("cur_time", DESCENDING)
+            c_start = db.location.find({"bus_id":bus_id,
+                                        "loc":{"$within":{"$center":[[37.76048, -122.38895],
+                                                                     0.002]}}
+                                        }).sort("cur_time", DESCENDING)
             self.massage_start_data(c_start)
-            c_end = db.location.find({"bus_id":bus_id,"loc":{"$within":{"$center":[[37.80241, -122.4364],0.01]}}}).sort("cur_time", ASCENDING)
+            c_end = db.location.find({"bus_id":bus_id,
+                                      "loc":{"$within":{"$center":[[37.80241, -122.4364],
+                                                                   0.01]}}
+                                      }).sort("cur_time", ASCENDING)
             self.massage_end_data(c_end)
             
         return self.start_bus_ids_to_times, self.end_bus_ids_to_times
@@ -177,7 +181,10 @@ class Analyze(object):
     """
     Extracts necessary timestamps from data
     Input: a cursor with information of each stop
-    {u'route': u'22', u'lon': -122.38929, u'lat': 37.756979999999999, u'cur_time': 1299555746.4573929, u'_id': ObjectId('4d75a5a2ba528a0d61000164'), u'bus_id': u'8357', u'dir': u'null'}
+    {u'route': u'22', u'lon': -122.38929, u'lat': 37.756979999999999,
+    u'cur_time': 1299555746.4573929,
+    u'_id': ObjectId('4d75a5a2ba528a0d61000164'), u'bus_id': u'8357',
+    u'dir': u'null'}
     
     
     Output: dictionary with bus_id -> [t_0, t_1] where
@@ -195,24 +202,22 @@ class Analyze(object):
         of a bus hanging out at the end stop. 
     """     
     def massage_start_data(self, mongo_cursor):
-        LEAST_TIME_TO_DO_ROUNDTRIP = 50*60
         prev_timestamp = 2**50
         for line in mongo_cursor:
             bus_id = line['bus_id']
             timestamp = line['cur_time']
-            if timestamp < prev_timestamp - LEAST_TIME_TO_DO_ROUNDTRIP:
+            if timestamp < prev_timestamp - self.LEAST_TIME_TO_DO_ROUNDTRIP:
                 self.start_bus_ids_to_times[bus_id].append(timestamp)
                 prev_timestamp = timestamp
         return self.start_bus_ids_to_times
       
     def massage_end_data(self, mongo_cursor):
-        LEAST_TIME_TO_DO_ROUNDTRIP = 50*60
         prev_timestamp = 0
         bus_ids_to_times = defaultdict(list)
         for line in mongo_cursor:
             bus_id = line['bus_id']
             timestamp = line['cur_time']
-            if timestamp > prev_timestamp + LEAST_TIME_TO_DO_ROUNDTRIP:
+            if timestamp > prev_timestamp + self.LEAST_TIME_TO_DO_ROUNDTRIP:
                 self.end_bus_ids_to_times[bus_id].append(timestamp)
                 prev_timestamp = timestamp
         return self.end_bus_ids_to_times
@@ -262,16 +267,10 @@ def get_schedule_data(cand_secs, dict_, tm_mon, tm_mday):
             if len(v) > 1:
                 dep_time = v[0]
                 end_time = v[1]
-#                d_hour, d_min, d_sec = dep_time.split(':')
-#                e_hour, e_min, e_sec = end_time.split(':')
-##    Now due to Muni's awesomeness, we may get hours like 29:05:00
-##    TODO: move this out when creating dict_
-#                if int(d_hour) > 23:
-#                    dep_time = ':'.join([str(int(d_hour)-24), d_min, d_sec])
-#                if int(e_hour) > 23:
-#                    end_time = ':'.join([str(int(e_hour)-24), e_min, e_sec])
-                tmp_start = convert_to_epoch_time(dep_time, 2011, tm_mon, tm_mday)
-                tmp_end = convert_to_epoch_time(end_time, 2011, tm_mon, tm_mday)
+                tmp_start = convert_to_epoch_time(dep_time, 2011, tm_mon,
+                                                   tm_mday)
+                tmp_end = convert_to_epoch_time(end_time, 2011, tm_mon,
+                                                 tm_mday)
                 dict_times[tmp_start] = [tmp_end, k]
                 epoch_times_start.append(tmp_start)
                 epoch_times_end.append(tmp_end)
@@ -292,7 +291,10 @@ def get_schedule_data(cand_secs, dict_, tm_mon, tm_mday):
     for i, tmp_time in enumerate(epoch_times_start):
         # if the run started within 32 secs of next scheduled run
         # helping decrease error b/c we are collecting data every 30 secs
-        if cand_secs+62 > tmp_time > cand_secs-62:
+        """
+        Allowing Muni to leave up to two minutes early (gasp!)
+        """
+        if cand_secs+120 > tmp_time > cand_secs-62:
             start = epoch_times_start[i]
             end, route_id = dict_times[start]
             break
@@ -309,8 +311,6 @@ def get_schedule_data(cand_secs, dict_, tm_mon, tm_mday):
 def connect_to_mongo():
     mongodb_local_hostname = 'ip-10-170-26-73'
     mongodb_host = 'ec2-50-18-72-59.us-west-1.compute.amazonaws.com'
-    # letting runs finish for 2 more hours
-    # ideally, want to make this a function of time from schedule plus some variation, like 1 hour just in case 
     hostname = socket.gethostname()
     if hostname == mongodb_local_hostname:
         conn = pymongo.Connection()
@@ -327,6 +327,7 @@ def process_data(dict_start_time, dict_end_time):
     tmp_min = []    
     run_times = [] # list of all trip lengths in secs
     late_times = [] # list of latenesses in secs
+    route_ids = []
     num_not_found = 0
     num_deleted = 0
 
@@ -339,7 +340,8 @@ def process_data(dict_start_time, dict_end_time):
         at this point we have a list of epoch times and will need to find closest
             epoch time from schedule
         problems with approach:
-            - need to check freshness of data, so maybe the gps was not updated in time
+            - need to check freshness of data, so maybe the gps was not updated
+             in time
             - how to check if maybe bus left early
         """
         if bus_id in dict_end_time:
@@ -358,7 +360,9 @@ def process_data(dict_start_time, dict_end_time):
                         % (str(datetime.timedelta(seconds=int(lateness))),
                          str(time.ctime(schd_epoch_start)))
                     else:
-                        print "Leaving early by:" + str(datetime.timedelta(seconds=int(abs(lateness)))) + " when should have left at " + str(time.ctime(schd_epoch_start))
+                        print "Leaving early by: %s when should have left at %s"\
+                         % (str(datetime.timedelta(seconds=int(abs(lateness)))),
+                             str(time.ctime(schd_epoch_start)))
                 tmp_min = []
                 for end_time in tmp_end_times:
                     diff = end_time - start_time
@@ -372,36 +376,44 @@ def process_data(dict_start_time, dict_end_time):
                         time_shld_take = int(schd_epoch_end-schd_epoch_start)
                         if time_shld_take < 0: #we undershot the estimate by a day
                             time_shld_take += 86400 
-                        print "Time taken:" + str(datetime.timedelta(seconds=min_diff)) + " while should have: " + str(datetime.timedelta(seconds=time_shld_take))
-                        print "Arrived at: %s while should have at: %s " % (str(time.ctime(start_time+min_diff)), str(time.ctime(schd_epoch_end)))
+                        print "Time taken: %s while should have: %s"\
+                         % (str(datetime.timedelta(seconds=min_diff)),
+                             str(datetime.timedelta(seconds=time_shld_take)))
+                        print "Arrived at: %s while should have at: %s"\
+                         % (str(time.ctime(start_time+min_diff)),
+                             str(time.ctime(schd_epoch_end)))
                         tmp_lateness = min_diff-time_shld_take+lateness
                         output_row = Output(route_id,
                                             bus_id,
                                             time.ctime(start_time),
                                             time.ctime(start_time+min_diff),
                                             tmp_lateness,
-                                            str(datetime.timedelta(seconds=tmp_lateness))
+                                            str(datetime.\
+                                                timedelta(seconds=tmp_lateness))
                                             )
                         summary.insert(output_row.to_mongo())
-                        if tmp_lateness < 0: #omfg, muni came early!
-                            tmp_lateness = abs(tmp_lateness)
-                            print "Minutes early: " + str(datetime.timedelta(seconds=tmp_lateness))
-                            tmp_lateness = -tmp_lateness # for average
-                        else:
-                            print "Minutes late: " + str(datetime.timedelta(seconds=tmp_lateness))
-                        run_times.append(min_diff)
+                        route_ids.append(route_id)
                         late_times.append(tmp_lateness)
+
+                        if tmp_lateness < 0: #omfg, muni came early!
+                            print "Minutes early: %s"\
+                             % str(datetime.timedelta(seconds=abs(tmp_lateness)))
+                        else:
+                            print "Minutes late: %s"\
+                            % str(datetime.timedelta(seconds=tmp_lateness))
+                        run_times.append(min_diff)
                         
                         if route_id == 0:
                             num_not_found += 1
                         """
-                            After we have already used up the route_id in the dictionary, then 
-                            pop it off as we do not want to use it again.
+                            After we have already used up the route_id in the
+                            dictionary, then pop it off as we do not want to 
+                            use it again.
                             But, we are running over multiple days!
                         """
-                        if route_id in dict_:
-                            del dict_[route_id]
-                            num_deleted += 1
+#                        if route_id in dict_:
+#                            del dict_[route_id]
+#                            num_deleted += 1
 
     int_num_left = 0
     for k, v in dict_.iteritems():
@@ -411,16 +423,22 @@ def process_data(dict_start_time, dict_end_time):
     avg_run_time = sum(run_times)/len(run_times)
     avg_lateness = sum(late_times)/len(late_times)
     print "average run time: %s based on %s runs"\
-     % (str(datetime.timedelta(seconds=avg_run_time)), str(len(run_times)))
+     % (str(datetime.timedelta(seconds=avg_run_time)),
+         str(len(run_times)))
     if avg_lateness < 0:
         avg_lateness = abs(avg_lateness)
         print "average earliness: %s based on %s runs"\
-        % (str(datetime.timedelta(seconds=avg_lateness)), str(len(late_times)))
+        % (str(datetime.timedelta(seconds=avg_lateness)),
+            str(len(late_times)))
     else:
         print "average lateness: %s based on %s runs"\
-         % (str(datetime.timedelta(seconds=avg_lateness)), str(len(late_times)))
-    print "number of dictionary entries left with end times: %d out of total: %d and number deleted: %d" % (int_num_left, len(dict_), num_deleted)
+         % (str(datetime.timedelta(seconds=avg_lateness)),
+             str(len(late_times)))
+    print ("number of dictionary entries left with end times: %d out of total:"
+     " %d and number deleted: %d") % (int_num_left, len(dict_), num_deleted)
     print "number of routes not found: %d" % (num_not_found)
+    route_ids.sort()
+    print "route ids: %s" % (str(route_ids))
 
 if __name__ == "__main__":
         LOG_FILENAME = '/tmp/Muni.out'
@@ -433,11 +451,9 @@ if __name__ == "__main__":
         print "====finished retrieving mysql schedule"
         print "==== starting to retrieve data ===="
         dict_start, dict_end = analyze.get_data()
-#        print "==== starting to massage data ===="
-#        dict_start = massage_data(list_start, True)
-#        dict_end = massage_data(list_end, False)
         print "==== starting processing data ===="
         process_data(dict_start, dict_end)
         taken = time.time()-start
-        print "time taken to run: %s" % (str(datetime.timedelta(seconds=taken)))
+        print "time taken to run: %s"\
+         % (str(datetime.timedelta(seconds=taken)))
         print "===DONE===" * 20
