@@ -1,10 +1,7 @@
-h1. Muni Project
+Muni Project
 
-h2. Requirements:
+Requirements:
 MySQL DB with Muni data
 MongoDB
 pymongo
 python
-
-h2. Usage:
-TDB

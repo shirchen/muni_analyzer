@@ -101,13 +101,19 @@ class Downloader(MuniMain):
     """
     def uploadToMongo(self, coord):
         conn = pymongo.Connection(self.str_mongoServer)
-        db = conn.muni_database # picking muni_database db
+#        db = conn.muni_database # picking muni_database db
+        db = conn.muni # picking muni db
         location = db.location  # picking the collection to insert data into
-        coordinate = {"route": coord.route,\
-                       "bus_id": coord.bus_id,\
-                       "cur_time": coord.cur_time,\
-                       "lat": coord.float_lat,\
-                       "lon": coord.float_lon,\
+#        coordinate = {"route": coord.route,\
+#                       "bus_id": coord.bus_id,\
+#                       "cur_time": coord.cur_time,\
+#                       "lat": coord.float_lat,\
+#                       "lon": coord.float_lon,\
+#                       "dir": coord.dir_tag}
+        coordinate = {"route": coord.route,
+                       "bus_id": coord.bus_id,
+                       "cur_time": coord.cur_time,
+                       "loc":{"lat":coord.float_lat,"lon": coord.float_lon},
                        "dir": coord.dir_tag}
         location.insert(coordinate)
 
