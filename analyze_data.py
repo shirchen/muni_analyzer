@@ -33,14 +33,18 @@ class Output(object):
                  start_time,
                  end_time,
                  secs_late,
-                 readable_late
+                 schd_start,
+                 schd_end,
+                 leaving_late
                  ):
         self.route_id = route_id
         self.bus_id = bus_id
         self.start_time = start_time
         self.end_time = end_time
         self.secs_late = secs_late
-        self.readable_late = readable_late
+        self.schd_start = schd_start
+        self.schd_end = schd_end
+        self.leaving_late = leaving_late
         
     def to_mongo(self):
         row = {"route_id": self.route_id,
@@ -48,7 +52,9 @@ class Output(object):
                "start_time": self.start_time,
                "end_time": self.end_time,
                "secs_late" : self.secs_late,
-               "readable_late": self.readable_late,
+               "schd_start": self.schd_start,
+               "schd_end" : self.schd_end,
+               "leaving_late" : self.leaving_late,
                }
         return row
 
@@ -143,19 +149,19 @@ class Analyze(object):
         Output: a processed dictionary with dictionary with bus_id -> [t_0, t_1]
             mapping
         """
-        epoch_from = 1301641200
-        epoch_to = epoch_from+60*60*24
+#        epoch_from = 1301641200
+#        epoch_to = epoch_from+60*60*24
         """
          letting runs finish for 2 more hours
          ideally, want to make this a function of time from schedule plus some
         variation, like 1 hour just in case
         """ 
-        epoch_to_adjusted = epoch_to + 7200
+#        epoch_to_adjusted = epoch_to + 7200
         conn = connect_to_mongo()
         db = conn.muni
         
-        print "==== Collecting starting runs from %s to %s ===="\
-         % (str(time.ctime(epoch_from)), str(time.ctime(epoch_to)))
+#        print "==== Collecting starting runs from %s to %s ===="\
+#         % (str(time.ctime(epoch_from)), str(time.ctime(epoch_to)))
         """
         > db.location.find({loc:{$within:{$center:[[37.80241, -122.4364],
         0.01]}}})
@@ -169,9 +175,13 @@ class Analyze(object):
                                                                      0.002]}}
                                         }).sort("cur_time", DESCENDING)
             self.massage_start_data(c_start)
+            """
+            TODO: the end point seems to be too nice to Muni, need to tighten
+            the circle a little
+            """
             c_end = db.location.find({"bus_id":bus_id,
                                       "loc":{"$within":{"$center":[[37.80241, -122.4364],
-                                                                   0.01]}}
+                                                                   0.001]}}
                                       }).sort("cur_time", ASCENDING)
             self.massage_end_data(c_end)
             
@@ -292,9 +302,9 @@ def get_schedule_data(cand_secs, dict_, tm_mon, tm_mday):
         # if the run started within 32 secs of next scheduled run
         # helping decrease error b/c we are collecting data every 30 secs
         """
-        Allowing Muni to leave up to two minutes early (gasp!)
+        Allowing Muni to leave up to 200 secs early (gasp!)
         """
-        if cand_secs+120 > tmp_time > cand_secs-62:
+        if cand_secs+200 > tmp_time > cand_secs-62:
             start = epoch_times_start[i]
             end, route_id = dict_times[start]
             break
@@ -328,6 +338,8 @@ def process_data(dict_start_time, dict_end_time):
     run_times = [] # list of all trip lengths in secs
     late_times = [] # list of latenesses in secs
     route_ids = []
+    bus_ids_not_found = []
+    end_times_not_found = []
     num_not_found = 0
     num_deleted = 0
 
@@ -353,6 +365,9 @@ def process_data(dict_start_time, dict_end_time):
                  get_schedule_data(start_time, dict_, tm_mon, tm_mday)
                 print "==== %s "  "==== for route id: %s" % \
                 (time.ctime(start_time), route_id)
+                if route_id == 0:
+                     num_not_found += 1
+                     bus_ids_not_found.append({bus_id:start_time})
                 if schd_epoch_start > 0:
                     lateness = start_time-schd_epoch_start
                     if lateness > 0:
@@ -385,11 +400,12 @@ def process_data(dict_start_time, dict_end_time):
                         tmp_lateness = min_diff-time_shld_take+lateness
                         output_row = Output(route_id,
                                             bus_id,
-                                            time.ctime(start_time),
-                                            time.ctime(start_time+min_diff),
+                                            start_time,
+                                            start_time+min_diff,
                                             tmp_lateness,
-                                            str(datetime.\
-                                                timedelta(seconds=tmp_lateness))
+                                            schd_epoch_start,
+                                            schd_epoch_end, 
+                                            lateness
                                             )
                         summary.insert(output_row.to_mongo())
                         route_ids.append(route_id)
@@ -403,18 +419,19 @@ def process_data(dict_start_time, dict_end_time):
                             % str(datetime.timedelta(seconds=tmp_lateness))
                         run_times.append(min_diff)
                         
-                        if route_id == 0:
-                            num_not_found += 1
                         """
                             After we have already used up the route_id in the
                             dictionary, then pop it off as we do not want to 
                             use it again.
                             But, we are running over multiple days!
                         """
-#                        if route_id in dict_:
-#                            del dict_[route_id]
-#                            num_deleted += 1
-
+                else:
+                    print "Finishing time not found with all ending times"\
+                    % (tmp_end_times)
+                    end_times_not_found.append({bus_id:
+                                                [time.ctime(start_time),
+                                                  dict_end_time[bus_id]]
+                                                })
     int_num_left = 0
     for k, v in dict_.iteritems():
         if len(v) == 2:
@@ -436,9 +453,24 @@ def process_data(dict_start_time, dict_end_time):
              str(len(late_times)))
     print ("number of dictionary entries left with end times: %d out of total:"
      " %d and number deleted: %d") % (int_num_left, len(dict_), num_deleted)
-    print "number of routes not found: %d" % (num_not_found)
+    print "number of routes not found: %d with pairs: %s"\
+     % (num_not_found, str(bus_ids_not_found))
+    # Looks like when we do not get to the end we just simply finished a 
+    # shortened version of the route and went home to the bus yard after 
+    # turning off the GPS
+#    for not_found_item in end_times_not_found:
+#        print "bus_id: %s" % (not_found_item.keys())
+#        print "Starting time: %s" % (not_found_item.values()[0][0])
+#        for bus_time in not_found_item.values()[0][1]:
+#            print "Ending time: %s" % (time.ctime(bus_time))
+    
+    dups = []
     route_ids.sort()
-    print "route ids: %s" % (str(route_ids))
+
+    for route_id in route_ids:
+        if route_ids.count(route_id) > 1:
+            dups.append(route_id)
+    print "duplicate route ids: %s" % (str(list(set(dups))))
 
 if __name__ == "__main__":
         LOG_FILENAME = '/tmp/Muni.out'

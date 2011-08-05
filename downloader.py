@@ -55,6 +55,10 @@ class Downloader(MuniMain):
     At first, I was storing data into files, but now MongoDB is used 
     """    
     def writeDataToFile(self, coord):
+        route_directory = os.path.join(self.directory, self.route)
+        if not os.path.isdir(route_directory):
+            os.makedirs(route_directory)
+
         str_fileName = os.path.join(self.directory, self.route,
                                      time.strftime("%Y%m%d-%H"))        
         file_w = open(str_fileName, 'a+')    
@@ -65,9 +69,6 @@ class Downloader(MuniMain):
 
     def parse_location_data(self, xml_response):
         doc = xml.dom.pulldom.parseString(xml_response)
-        route_directory = os.path.join(self.directory, self.route)
-        if not os.path.isdir(route_directory):
-            os.makedirs(route_directory)
         try:
             for event, node in doc:
                 if event == 'START_ELEMENT' and node.nodeName == 'vehicle':

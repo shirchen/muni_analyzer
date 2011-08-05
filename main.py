@@ -16,7 +16,8 @@ class MuniMain(object):
         self.route = route
         self.base_directory = os.path.expanduser("~/muni")
         self.base_http_nextbus = 'http://webservices.nextbus.com/service/publicXMLFeed?'
-        self.str_mongoServer = 'ec2-50-16-77-90.compute-1.amazonaws.com'
+        self.str_mongoServer = 'ec2-50-18-72-59.us-west-1.compute.amazonaws.com'
+
     
     def setup(self):
 
