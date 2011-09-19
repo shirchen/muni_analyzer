@@ -132,7 +132,8 @@ if __name__=="__main__":
     logging.basicConfig(filename=LOG_FILENAME,level=logging.INFO)
     try:
         opts, args = getopt.getopt(sys.argv[1:], "hlp:r:t:v",
-                                    ["help", "logging", "period=" "route=", "time="])
+                                    ["help", "logging", "period=", "route=",
+                                      "time="])
     except getopt.GetoptError, err:
         # print help information and exit:
         print "Error: " + str(err) # will print something like "option -a not recognized"

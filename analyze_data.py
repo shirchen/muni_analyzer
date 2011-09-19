@@ -16,10 +16,12 @@ TODOs:
 '''
 
 import datetime
+import getopt
 import logging
 import os
 import pymongo
 import socket
+import sys
 import time
 import _mysql
 from collections import defaultdict
@@ -28,7 +30,8 @@ from pymongo import ASCENDING, DESCENDING
 class Output(object):
     
     def __init__(self, 
-                 route_id,
+                 route_name,
+                 trip_id,
                  bus_id,
                  start_time,
                  end_time,
@@ -37,7 +40,8 @@ class Output(object):
                  schd_end,
                  leaving_late
                  ):
-        self.route_id = route_id
+        self.route_name = route_name
+        self.trip_id = trip_id
         self.bus_id = bus_id
         self.start_time = start_time
         self.end_time = end_time
@@ -47,7 +51,8 @@ class Output(object):
         self.leaving_late = leaving_late
         
     def to_mongo(self):
-        row = {"route_id": self.route_id,
+        row = {"route_name" :self.route_name,
+               "trip_id": self.trip_id,
                "bus_id" : self.bus_id,
                "start_time": self.start_time,
                "end_time": self.end_time,
@@ -62,13 +67,41 @@ class Analyze(object):
     mysql_password = None
     
 
-    def __init__(self):
+    def __init__(self, route_name):
         self.to_log = False
         self.mysql_host = "ec2-50-18-72-59.us-west-1.compute.amazonaws.com"
         self.mysql_local_hostname = 'ip-10-170-26-73'
         self.start_bus_ids_to_times = defaultdict(list)
         self.end_bus_ids_to_times = defaultdict(list)
         self.LEAST_TIME_TO_DO_ROUNDTRIP = 50*60
+        self.route_name = route_name
+    
+    def setup_route_info(self):
+        if self.route_name == '22':
+            self.route_id = "6011"
+            self.service_id = "1"
+            self.direction_id = "1"
+            self.first_stop = "1"
+            self.last_stop = "45"
+            self.mysql_data = {'route_id':"6011", 'service_id':"1",
+                                'direction_id':"1", 'first_stop':"1",
+                                 'last_stop':"45"}
+            
+            self.start_lat, self.start_lon, self.start_prec =\
+             37.76048, -122.38895, 0.002
+            self.end_lat, self.end_lon, self.end_prec =\
+             37.80241, -122.4364, 0.001
+        elif self.route_name == 'J':
+            self.mysql_data = {'route_id':"1094", 'service_id':"1"}
+        elif self.route_name == '14':
+            self.mysql_data = {'route_id':"6005", 'service_id':"1",
+                               'direction_id':"1",'first_stop':"1",
+                               'last_stop':"51"}
+            self.start_lat, self.start_lon, self.start_prec =\
+             37.706, -122.461, 0.002
+            self.end_lat, self.end_lon, self.end_prec =\
+             37.7932, -122.393, 0.002
+
         
     def get_mysql_password(self):
         file = open(os.path.expanduser("~/.mysql_password"))
@@ -99,11 +132,20 @@ class Analyze(object):
     
         """
         hostname = socket.gethostname()
-        query_times = "select st.departure_time, st.stop_sequence, st.trip_id" +\
-        " from stop_times st join trips t using (trip_id)" +\
-        " where t.route_id='6011' and t.service_id='1' and t.direction_id='1'" +\
-        " and (st.stop_sequence = '1' or st.stop_sequence = '45')" +\
-        " order by trip_id, stop_sequence asc;" 
+        query_times = ("select st.departure_time, st.stop_sequence, st.trip_id" 
+        " from stop_times st join trips t using (trip_id)" 
+        " where t.route_id=%(route_id)s and t.service_id=%(service_id)s"
+        " and t.direction_id=%(direction_id)s" 
+        " and (st.stop_sequence = %(first_stop)s or st.stop_sequence = %(last_stop)s)" 
+        " order by trip_id, stop_sequence asc;") % self.mysql_data
+        print query_times
+#         % (self.route_id,  self.service_id, self.direction_id, self.first_stop, self.last_stop)
+#
+#        query_times = "select st.departure_time, st.stop_sequence, st.trip_id" +\
+#        " from stop_times st join trips t using (trip_id)" +\
+#        " where t.route_id='6011' and t.service_id='1' and t.direction_id='1'" +\
+#        " and (st.stop_sequence = '1' or st.stop_sequence = '45')" +\
+#        " order by trip_id, stop_sequence asc;" 
         print "running sql query: " + query_times
         self.get_mysql_password()        
         if self.to_log:
@@ -168,11 +210,11 @@ class Analyze(object):
         > db.location.find({loc:{$within:{$center:[[37.76048, -122.38895],
         0.002]}}})
         """
-        bus_ids = db.location.distinct("bus_id")
+        bus_ids = db.location.find({'route':self.route_name}).distinct("bus_id")
         for bus_id in bus_ids:
             c_start = db.location.find({"bus_id":bus_id,
-                                        "loc":{"$within":{"$center":[[37.76048, -122.38895],
-                                                                     0.002]}}
+                                        "loc":{"$within":{"$center":[[self.start_lat, self.start_lon],
+                                                                     self.start_prec]}}
                                         }).sort("cur_time", DESCENDING)
             self.massage_start_data(c_start)
             """
@@ -180,8 +222,8 @@ class Analyze(object):
             the circle a little
             """
             c_end = db.location.find({"bus_id":bus_id,
-                                      "loc":{"$within":{"$center":[[37.80241, -122.4364],
-                                                                   0.001]}}
+                                      "loc":{"$within":{"$center":[[self.end_lat, self.end_lon],
+                                                                   self.end_prec]}}
                                       }).sort("cur_time", ASCENDING)
             self.massage_end_data(c_end)
             
@@ -231,6 +273,154 @@ class Analyze(object):
                 self.end_bus_ids_to_times[bus_id].append(timestamp)
                 prev_timestamp = timestamp
         return self.end_bus_ids_to_times
+    
+    def process_data(self, dict_start_time, dict_end_time):
+        conn = connect_to_mongo()
+        db = conn.muni
+        summary = db.summary
+        
+        tmp_min = []    
+        run_times = [] # list of all trip lengths in secs
+        late_times = [] # list of latenesses in secs
+        trip_ids = []
+        bus_ids_not_found = []
+        end_times_not_found = []
+        num_not_found = 0
+        num_deleted = 0
+    
+        for bus_id in dict_start_time:
+            ### TODO:
+            ### why only 1 start time ???
+            
+            tmp_start_times = dict_start_time[bus_id]
+            """
+            at this point we have a list of epoch times and will need to find closest
+                epoch time from schedule
+            problems with approach:
+                - need to check freshness of data, so maybe the gps was not updated
+                 in time
+                - how to check if maybe bus left early
+            """
+            if bus_id in dict_end_time:
+                tmp_end_times = dict_end_time[bus_id]
+                print "===========" + bus_id + "============"    
+                for start_time in tmp_start_times:
+                    tm_mon, tm_mday = approx_date(start_time)
+                    [schd_epoch_start, schd_epoch_end, trip_id] =\
+                     get_schedule_data(start_time, dict_, tm_mon, tm_mday)
+                    print "==== %s "  "==== for route id: %s" % \
+                    (time.ctime(start_time), trip_id)
+                    if trip_id == 0:
+                         num_not_found += 1
+                         bus_ids_not_found.append({bus_id:start_time})
+                    if schd_epoch_start > 0:
+                        lateness = start_time-schd_epoch_start
+                        if lateness > 0:
+                            print "Leaving late by: %s when should have left at %s"\
+                            % (str(datetime.timedelta(seconds=int(lateness))),
+                             str(time.ctime(schd_epoch_start)))
+                        else:
+                            print "Leaving early by: %s when should have left at %s"\
+                             % (str(datetime.timedelta(seconds=int(abs(lateness)))),
+                                 str(time.ctime(schd_epoch_start)))
+                    else:
+                        print 'Scheduled epoch time is invalid and is %s' % str(schd_epoch_start)
+                        print 'Bailing...'
+                        break
+                    tmp_min = []
+                    for end_time in tmp_end_times:
+                        diff = end_time - start_time
+                        if diff > 0:
+                            tmp_min.append(diff)
+                    if len(tmp_min) > 0:
+                        min_diff = min(tmp_min)
+                        #print "==" + time.ctime(end_time) + "=="
+                        # 14400 = 3 hours; 9000 = 2.5 hours
+                        if 0 < min_diff < 9000:
+                            time_shld_take = int(schd_epoch_end-schd_epoch_start)
+                            if time_shld_take < 0: #we undershot the estimate by a day
+                                time_shld_take += 86400 
+                            print "Time taken: %s while should have: %s"\
+                             % (str(datetime.timedelta(seconds=min_diff)),
+                                 str(datetime.timedelta(seconds=time_shld_take)))
+                            print "Arrived at: %s while should have at: %s"\
+                             % (str(time.ctime(start_time+min_diff)),
+                                 str(time.ctime(schd_epoch_end)))
+                            tmp_lateness = min_diff-time_shld_take+lateness
+                            output_row = Output(self.route_name,
+                                                trip_id,
+                                                bus_id,
+                                                start_time,
+                                                start_time+min_diff,
+                                                tmp_lateness,
+                                                schd_epoch_start,
+                                                schd_epoch_end, 
+                                                lateness
+                                                )
+                            summary.insert(output_row.to_mongo())
+                            trip_ids.append(trip_id)
+                            late_times.append(tmp_lateness)
+    
+                            if tmp_lateness < 0: #omfg, muni came early!
+                                print "Minutes early: %s"\
+                                 % str(datetime.timedelta(seconds=abs(tmp_lateness)))
+                            else:
+                                print "Minutes late: %s"\
+                                % str(datetime.timedelta(seconds=tmp_lateness))
+                            run_times.append(min_diff)
+                            
+                            """
+                                After we have already used up the trip_id in the
+                                dictionary, then pop it off as we do not want to 
+                                use it again.
+                                But, we are running over multiple days!
+                            """
+                    else:
+                        print "Finishing time not found with all ending times"\
+                        % (tmp_end_times)
+                        end_times_not_found.append({bus_id:
+                                                    [time.ctime(start_time),
+                                                      dict_end_time[bus_id]]
+                                                    })
+        int_num_left = 0
+        for k, v in dict_.iteritems():
+            if len(v) == 2:
+                int_num_left += 1
+            
+        avg_run_time = sum(run_times)/len(run_times)
+        avg_lateness = sum(late_times)/len(late_times)
+        print "average run time: %s based on %s runs"\
+         % (str(datetime.timedelta(seconds=avg_run_time)),
+             str(len(run_times)))
+        if avg_lateness < 0:
+            avg_lateness = abs(avg_lateness)
+            print "average earliness: %s based on %s runs"\
+            % (str(datetime.timedelta(seconds=avg_lateness)),
+                str(len(late_times)))
+        else:
+            print "average lateness: %s based on %s runs"\
+             % (str(datetime.timedelta(seconds=avg_lateness)),
+                 str(len(late_times)))
+        print ("number of dictionary entries left with end times: %d out of total:"
+         " %d and number deleted: %d") % (int_num_left, len(dict_), num_deleted)
+        print "number of routes not found: %d with pairs: %s"\
+         % (num_not_found, str(bus_ids_not_found))
+        # Looks like when we do not get to the end we just simply finished a 
+        # shortened version of the route and went home to the bus yard after 
+        # turning off the GPS
+    #    for not_found_item in end_times_not_found:
+    #        print "bus_id: %s" % (not_found_item.keys())
+    #        print "Starting time: %s" % (not_found_item.values()[0][0])
+    #        for bus_time in not_found_item.values()[0][1]:
+    #            print "Ending time: %s" % (time.ctime(bus_time))
+        
+        dups = []
+        trip_ids.sort()
+    
+        for trip_id in trip_ids:
+            if trip_ids.count(trip_id) > 1:
+                dups.append(trip_id)
+        print "duplicate route ids: %s" % (str(list(set(dups))))
 
 # Helpers
 
@@ -297,7 +487,7 @@ def get_schedule_data(cand_secs, dict_, tm_mon, tm_mday):
     
     start = 0
     end = 0
-    route_id = 0
+    trip_id = 0
     for i, tmp_time in enumerate(epoch_times_start):
         # if the run started within 32 secs of next scheduled run
         # helping decrease error b/c we are collecting data every 30 secs
@@ -306,14 +496,14 @@ def get_schedule_data(cand_secs, dict_, tm_mon, tm_mday):
         """
         if cand_secs+200 > tmp_time > cand_secs-62:
             start = epoch_times_start[i]
-            end, route_id = dict_times[start]
+            end, trip_id = dict_times[start]
             break
 #    TODO: fix this
         elif tmp_time > cand_secs:
             start = epoch_times_start[i-1]
-            end, route_id = dict_times[start]
+            end, trip_id = dict_times[start]
             break
-    return [start, end, route_id]
+    return [start, end, trip_id]
 
     
     
@@ -329,148 +519,7 @@ def connect_to_mongo():
         
     return conn
 
-def process_data(dict_start_time, dict_end_time):
-    conn = connect_to_mongo()
-    db = conn.muni
-    summary = db.summary
-    
-    tmp_min = []    
-    run_times = [] # list of all trip lengths in secs
-    late_times = [] # list of latenesses in secs
-    route_ids = []
-    bus_ids_not_found = []
-    end_times_not_found = []
-    num_not_found = 0
-    num_deleted = 0
 
-    for bus_id in dict_start_time:
-        ### TODO:
-        ### why only 1 start time ???
-        
-        tmp_start_times = dict_start_time[bus_id]
-        """
-        at this point we have a list of epoch times and will need to find closest
-            epoch time from schedule
-        problems with approach:
-            - need to check freshness of data, so maybe the gps was not updated
-             in time
-            - how to check if maybe bus left early
-        """
-        if bus_id in dict_end_time:
-            tmp_end_times = dict_end_time[bus_id]
-            print "===========" + bus_id + "============"    
-            for start_time in tmp_start_times:
-                tm_mon, tm_mday = approx_date(start_time)
-                [schd_epoch_start, schd_epoch_end, route_id] =\
-                 get_schedule_data(start_time, dict_, tm_mon, tm_mday)
-                print "==== %s "  "==== for route id: %s" % \
-                (time.ctime(start_time), route_id)
-                if route_id == 0:
-                     num_not_found += 1
-                     bus_ids_not_found.append({bus_id:start_time})
-                if schd_epoch_start > 0:
-                    lateness = start_time-schd_epoch_start
-                    if lateness > 0:
-                        print "Leaving late by: %s when should have left at %s"\
-                        % (str(datetime.timedelta(seconds=int(lateness))),
-                         str(time.ctime(schd_epoch_start)))
-                    else:
-                        print "Leaving early by: %s when should have left at %s"\
-                         % (str(datetime.timedelta(seconds=int(abs(lateness)))),
-                             str(time.ctime(schd_epoch_start)))
-                tmp_min = []
-                for end_time in tmp_end_times:
-                    diff = end_time - start_time
-                    if diff > 0:
-                        tmp_min.append(diff)
-                if len(tmp_min) > 0:
-                    min_diff = min(tmp_min)
-                    #print "==" + time.ctime(end_time) + "=="
-                    # 14400 = 3 hours; 9000 = 2.5 hours
-                    if 0 < min_diff < 9000:
-                        time_shld_take = int(schd_epoch_end-schd_epoch_start)
-                        if time_shld_take < 0: #we undershot the estimate by a day
-                            time_shld_take += 86400 
-                        print "Time taken: %s while should have: %s"\
-                         % (str(datetime.timedelta(seconds=min_diff)),
-                             str(datetime.timedelta(seconds=time_shld_take)))
-                        print "Arrived at: %s while should have at: %s"\
-                         % (str(time.ctime(start_time+min_diff)),
-                             str(time.ctime(schd_epoch_end)))
-                        tmp_lateness = min_diff-time_shld_take+lateness
-                        output_row = Output(route_id,
-                                            bus_id,
-                                            start_time,
-                                            start_time+min_diff,
-                                            tmp_lateness,
-                                            schd_epoch_start,
-                                            schd_epoch_end, 
-                                            lateness
-                                            )
-                        summary.insert(output_row.to_mongo())
-                        route_ids.append(route_id)
-                        late_times.append(tmp_lateness)
-
-                        if tmp_lateness < 0: #omfg, muni came early!
-                            print "Minutes early: %s"\
-                             % str(datetime.timedelta(seconds=abs(tmp_lateness)))
-                        else:
-                            print "Minutes late: %s"\
-                            % str(datetime.timedelta(seconds=tmp_lateness))
-                        run_times.append(min_diff)
-                        
-                        """
-                            After we have already used up the route_id in the
-                            dictionary, then pop it off as we do not want to 
-                            use it again.
-                            But, we are running over multiple days!
-                        """
-                else:
-                    print "Finishing time not found with all ending times"\
-                    % (tmp_end_times)
-                    end_times_not_found.append({bus_id:
-                                                [time.ctime(start_time),
-                                                  dict_end_time[bus_id]]
-                                                })
-    int_num_left = 0
-    for k, v in dict_.iteritems():
-        if len(v) == 2:
-            int_num_left += 1
-        
-    avg_run_time = sum(run_times)/len(run_times)
-    avg_lateness = sum(late_times)/len(late_times)
-    print "average run time: %s based on %s runs"\
-     % (str(datetime.timedelta(seconds=avg_run_time)),
-         str(len(run_times)))
-    if avg_lateness < 0:
-        avg_lateness = abs(avg_lateness)
-        print "average earliness: %s based on %s runs"\
-        % (str(datetime.timedelta(seconds=avg_lateness)),
-            str(len(late_times)))
-    else:
-        print "average lateness: %s based on %s runs"\
-         % (str(datetime.timedelta(seconds=avg_lateness)),
-             str(len(late_times)))
-    print ("number of dictionary entries left with end times: %d out of total:"
-     " %d and number deleted: %d") % (int_num_left, len(dict_), num_deleted)
-    print "number of routes not found: %d with pairs: %s"\
-     % (num_not_found, str(bus_ids_not_found))
-    # Looks like when we do not get to the end we just simply finished a 
-    # shortened version of the route and went home to the bus yard after 
-    # turning off the GPS
-#    for not_found_item in end_times_not_found:
-#        print "bus_id: %s" % (not_found_item.keys())
-#        print "Starting time: %s" % (not_found_item.values()[0][0])
-#        for bus_time in not_found_item.values()[0][1]:
-#            print "Ending time: %s" % (time.ctime(bus_time))
-    
-    dups = []
-    route_ids.sort()
-
-    for route_id in route_ids:
-        if route_ids.count(route_id) > 1:
-            dups.append(route_id)
-    print "duplicate route ids: %s" % (str(list(set(dups))))
 
 if __name__ == "__main__":
         LOG_FILENAME = '/tmp/Muni.out'
@@ -478,13 +527,39 @@ if __name__ == "__main__":
         os.environ['TZ'] = 'US/Pacific'
         time.tzset()
         start = time.time()
-        analyze = Analyze()
+        
+        try:
+            opts, args = getopt.getopt(sys.argv[1:], "d:hlp:r:t:v",
+                                        ["direction=","help", "route="])
+        except getopt.GetoptError, err:
+            # print help information and exit:
+            print "Error: " + str(err) # will print something like "option -a not recognized"
+            sys.exit(2)
+        direction = "N"
+        route_name = None
+        verbose = False
+        for o, a in opts:
+            if o == "-v":
+                verbose = True
+            # Direction will be used in the future
+            elif o in ("-d", "--direction"):
+                direction = a
+            elif o in ("-h", "--help"):
+    #            usage()
+                sys.exit()
+            elif o in ("-r", "--route"):
+                route_name = a
+            else:
+                assert False, "unhandled option"
+
+        analyze = Analyze(route_name)
+        analyze.setup_route_info()
         dict_ = analyze.retrieve_schedule()
         print "====finished retrieving mysql schedule"
         print "==== starting to retrieve data ===="
         dict_start, dict_end = analyze.get_data()
         print "==== starting processing data ===="
-        process_data(dict_start, dict_end)
+        analyze.process_data(dict_start, dict_end)
         taken = time.time()-start
         print "time taken to run: %s"\
          % (str(datetime.timedelta(seconds=taken)))
