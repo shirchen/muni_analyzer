@@ -21,6 +21,7 @@ class Coordinates():
         self.dir_tag = a_dir_tag
         
 import Geohash
+import Coordinates
         
 class CheckCoordinate(object):
     
@@ -77,16 +78,18 @@ class CheckCoordinate(object):
             
             if end_lat == lat and end_lon == lon:
                 print 'Trip ended and adding summary line'
+                self.expire_trip(coord.bus_id)
             
         else:
             """
             dont know much about bus, but lets see if we are starting a trip
             """
             trip_id = self.find_trip_id()
+            self.add_to_queue(coord)
     
     """
-    Input:
-    Output:
+    Input: Coodinates object
+    Output: Trip_id which best approximates the trip bus is starting 
     Discussion:
         Finds the best match for a trip id, given time
         
