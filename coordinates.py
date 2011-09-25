@@ -3,6 +3,7 @@ Created on Mar 4, 2011
 
 @author: shirchen
 '''
+from schedule.schedule_pull import Schedule_Pull
 
 class Coordinates():
     
@@ -22,15 +23,18 @@ class Coordinates():
         
 import Geohash
 import Coordinates
+import Schedule_Pull
         
 class CheckCoordinate(object):
     
     def __init__(self):
         """
+        needs to be pulled
         contains a list of of trip_ids given a geohash of a (lat, lon)
         """
         self.start_point_to_trips = {}
         """
+        needs to be pulled
         contains a hash of trip_id to [departure, arrival]
         """
         self.trip_to_dep_arr_times = {}
@@ -39,6 +43,7 @@ class CheckCoordinate(object):
         """
         self.active_bus_to_trip_id = {}
         """
+        needs to be pulled
         contains a hash of trip_id to its end point
         """
         self.trip_to_end_point = {}
@@ -55,7 +60,10 @@ class CheckCoordinate(object):
     """
     
     def setup_dicts(self):
-        pass
+        schd_pull = Schedule_Pull('22')
+        schd_pull.setup_route_info()
+        self.trip_to_dep_arr_times = sched_pull.retrieve_schedule()
+        
     
     """
     Input: Coordinates object

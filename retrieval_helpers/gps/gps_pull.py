@@ -129,6 +129,7 @@ def tests():
 
 
 if __name__ == "__main__":
+    tests()
     gps_pull = GPS_Pull('22')
     gps_pull.setup_route_info()
     gps_pull.get_data()

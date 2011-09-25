@@ -9,6 +9,7 @@ import _mysql
 import datetime
 import logging
 import os
+import psycopg2
 import socket
 import time
 from collections import defaultdict
@@ -17,8 +18,11 @@ from collections import defaultdict
 class Schedule_Pull(object):
     
     def __init__(self, route_name):
+        self.to_log = True
         self.mysql_host = "ec2-50-18-72-59.us-west-1.compute.amazonaws.com"
         self.mysql_local_hostname = 'ip-10-170-26-73'
+        self.mysql_password = None
+        self.psql_password = None
         self.route_name = route_name
         self.to_log = True
         self.trips = defaultdict(list)
@@ -54,6 +58,56 @@ class Schedule_Pull(object):
         mysql_password = file.readlines()[0].strip('\n')
         self.mysql_password = mysql_password
         return mysql_password
+    
+    def get_psql_password(self):
+        file = open(os.path.expanduser("~/.psql_password"))
+        psql_password = file.readlines()[0].strip('\n')
+        self.psql_password = psql_password
+        return psql_password
+
+    
+    def retrieve_pysql_schedule(self):
+        hostname = socket.gethostname()
+        query = ("select st.departure_time, st.trip_id" 
+        " from gtf_stop_times st, gtf_trips t" 
+        " where t.trip_id = st.trip_id" 
+        " and t.route_id=\'%(route_id)s\'"
+        " and t.service_id=\'%(service_id)s\'"
+        " and t.direction_id=%(direction_id)s" 
+        " and (st.stop_sequence = %(first_stop)s or st.stop_sequence = %(last_stop)s)" 
+        " order by trip_id, stop_sequence asc;") % self.mysql_data
+        
+        if hostname == self.mysql_local_hostname:
+            postgres_info = ("database=gtfs_muni")
+        else:
+            self.get_psql_password()
+            postgres_info = ("host=%s dbname=%s user=%s password=%s") %\
+             (self.mysql_host, "gtfs_muni", "gtfs_muni", self.psql_password)
+         
+         
+        conn = psycopg2.connect(postgres_info)
+        cur = conn.cursor()
+        if self.to_log:
+            print 'running: %s' % query
+            
+        cur.execute(query)
+        rows = cur.fetchall()
+        for row in rows:
+            departure_time = row[0]
+            """
+            Now due to Muni's awesomeness, we may get hours like 29:05:00
+            """ 
+            d_hour, d_min, d_sec = departure_time.split(':')
+            if int(d_hour) > 23:
+                    departure_time = ':'.join([str(int(d_hour)-24),
+                                               d_min, 
+                                               d_sec])
+            trip_id = row[1]
+            self.trips[trip_id].append(departure_time)
+        if self.to_log:
+            print self.trips
+        return self.trips
+
     
     def retrieve_schedule(self):
         """
@@ -94,7 +148,7 @@ class Schedule_Pull(object):
 #        " and (st.stop_sequence = '1' or st.stop_sequence = '45')" +\
 #        " order by trip_id, stop_sequence asc;" 
         print "running sql query: " + query_times
-        self.get_mysql_password()        
+        self.get_mysql_password()       
         if self.to_log:
             logging.info("Running mysql query: %s", query_times)
         if hostname == self.mysql_local_hostname:
@@ -128,7 +182,7 @@ class Schedule_Pull(object):
 #            pass
         if self.to_log:
             print self.trips
-#        return self.trips
+        return self.trips
     
     def get_schedule_data(self, cand_secs):
         """
@@ -216,8 +270,9 @@ def tests():
 
 
 if __name__ == "__main__":
+    tests()
     sched_pull = Schedule_Pull('22')
     sched_pull.setup_route_info()
-    sched_pull.retrieve_schedule()
+    sched_pull.retrieve_pysql_schedule()
     print sched_pull.get_schedule_data(1316659549)
     
