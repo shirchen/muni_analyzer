@@ -79,6 +79,7 @@ class Downloader(MuniMain):
                     str_lon = node.getAttribute("lon")
                     str_leadVhclID = node.getAttribute("leadingVehicleId")
                     str_secsSinceReport = node.getAttribute("secsSinceReport")
+                    speed = node.GetAttribute("speedKmHr")
                     if self.logging:
                         logging.info("Time: %s, Id: %s, Route: %s, DirTag: %s,"
                          "Lat: %s, Lon: %s,Leading ID: %s, Out of date: %s"\
@@ -88,8 +89,11 @@ class Downloader(MuniMain):
                     try:
                         coord = Coordinates(time.time(), str_id, 
                                             float(str_lat), float(str_lon),
-                                             str_dirTag, self.route)
-                        self.uploadToMongo(coord)
+                                             str_dirTag, self.route, speed)
+                        """
+                        Put back when we are actually collecting data
+                        """
+#                        self.uploadToMongo(coord)
                     except:
                         print 'Exception when creating object:' + sys.exc_info()[0]
                         raise 
@@ -115,7 +119,8 @@ class Downloader(MuniMain):
                        "bus_id": coord.bus_id,
                        "cur_time": coord.cur_time,
                        "loc":{"lat":coord.float_lat,"lon": coord.float_lon},
-                       "dir": coord.dir_tag}
+                       "dir": coord.dir_tag,
+                       "speed": coord.speed}
         location.insert(coordinate)
 
 # Helpers

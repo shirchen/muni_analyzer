@@ -18,7 +18,7 @@ from collections import defaultdict
 class Schedule_Pull(object):
     
     def __init__(self, route_name):
-        self.to_log = True
+        self.to_log = False
         self.mysql_host = "ec2-50-18-72-59.us-west-1.compute.amazonaws.com"
         self.mysql_local_hostname = 'ip-10-170-26-73'
         self.mysql_password = None

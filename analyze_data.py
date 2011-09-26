@@ -50,6 +50,26 @@ class Output(object):
         self.schd_end = schd_end
         self.leaving_late = leaving_late
         
+    def __str__(self):
+        return "route name: %s, "\
+            "trip_id: %s, "\
+            "bus_id: %s, "\
+            "start_time: %s, "\
+            "end_time: %s, "\
+            "secs_late: %s, "\
+            "schd_start: %s, "\
+            "schd_end: %s, "\
+            "leaving_late: %s"\
+     % (self.route_name,
+         self.trip_id,
+         self.bus_id,
+         self.start_time,
+         self.end_time,
+         self.secs_late,
+         self.schd_start,
+         self.schd_end,
+         self.leaving_late)
+        
     def to_mongo(self):
         row = {"route_name" :self.route_name,
                "trip_id": self.trip_id,
