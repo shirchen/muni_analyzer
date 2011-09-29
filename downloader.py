@@ -22,7 +22,7 @@ import sys
 import time
 import xml.dom.pulldom
 from main import MuniMain
-from coordinates import Coordinates
+from coordinates import Coordinates, CheckCoordinate
 
 '''
 Class to store one line of Muni data that comes in
@@ -34,6 +34,11 @@ class Downloader(MuniMain):
         MuniMain.__init__(self, route)
         self.directory = os.path.join(self.base_directory,'location')
         self.logging = False
+        co = CheckCoordinate()
+        co.setup_dicts()
+        co.setup_trips_to_end_points()
+        self.co = co
+
         
         
     def download_location(self):
@@ -51,6 +56,10 @@ class Downloader(MuniMain):
 
         except Exception, e:
             print 'Could not make call %s, got exception: %s' % (http_location_call, str(e))
+            try:
+                print "Response: %s, content: %s" %(http_resp, content)
+            except:
+                pass
     """
     At first, I was storing data into files, but now MongoDB is used 
     """    
@@ -79,7 +88,7 @@ class Downloader(MuniMain):
                     str_lon = node.getAttribute("lon")
                     str_leadVhclID = node.getAttribute("leadingVehicleId")
                     str_secsSinceReport = node.getAttribute("secsSinceReport")
-                    speed = node.GetAttribute("speedKmHr")
+                    speed = node.getAttribute("speedKmHr")
                     if self.logging:
                         logging.info("Time: %s, Id: %s, Route: %s, DirTag: %s,"
                          "Lat: %s, Lon: %s,Leading ID: %s, Out of date: %s"\
@@ -90,6 +99,11 @@ class Downloader(MuniMain):
                         coord = Coordinates(time.time(), str_id, 
                                             float(str_lat), float(str_lon),
                                              str_dirTag, self.route, speed)
+                        try:
+                            self.co.check_point(coord)
+                        except:
+                            print 'Failed to check coordinate: %s'\
+                            % (str(coord))
                         """
                         Put back when we are actually collecting data
                         """

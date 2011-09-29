@@ -78,7 +78,7 @@ class Schedule_Pull(object):
         " order by trip_id, stop_sequence asc;") % self.mysql_data
         
         if hostname == self.mysql_local_hostname:
-            postgres_info = ("database=gtfs_muni")
+            postgres_info = ("dbname=gtfs_muni")
         else:
             self.get_psql_password()
             postgres_info = ("host=%s dbname=%s user=%s password=%s") %\

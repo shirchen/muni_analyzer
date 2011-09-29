@@ -7,6 +7,8 @@ import datetime
 import time
 from schedule import schedule_pull
 from analyze_data import Output
+from gps import mongodb_connector
+import math
 
 class Coordinates():
     
@@ -25,6 +27,23 @@ class Coordinates():
         self.float_lon = a_float_lon
         self.dir_tag = a_dir_tag
         self.speed = a_speed
+        
+    
+    def __str__(self):
+        return "route: %s, "\
+            "cur_time: %s, "\
+            "bus_id: %s, "\
+            "lat: %s, "\
+            "lon: %s, "\
+            "dir_tag: %s, "\
+            "speed: %s"\
+            % (self.route,
+               self.cur_time,
+               self.bus_id,
+               self.float_lat,
+               self.float_lon,
+               self.dir_tag,
+               self.speed)
         
 import Geohash
 #import Coordinates
@@ -56,6 +75,11 @@ class CheckCoordinate(object):
         set of all active bus_ids
         """
         self.set_active_bus_ids = set() #Local
+        """
+        Dictionary of starting trip candidates to previous location
+            and time when started
+        """
+        self.cand_bus_id_to_time_gps = {}
     
     """
     Input: Route_name eg '22'
@@ -114,19 +138,24 @@ class CheckCoordinate(object):
             """
             if our bus_id is on the move to the end
             """        
+            print 'Checking an active coordinate in list of trips: %s'\
+            % (str(coord))
+            
             lat = coord.float_lat
             lon = coord.float_lon
             trip_id = self.active_bus_to_trip_id[coord.bus_id][0]
+            print "After getting trip_id"
             # TDOO: how to compare?
             (end_lat, end_lon) = self.trip_to_end_point[trip_id]
-            
+            print 'Right before checking if nearby'
             ### TODO: relax exact location
 #            if end_lat == lat and end_lon == lon:
             if self.check_if_point_is_nearby(lat, lon, end_lat, end_lon):
                 print 'Trip ended and adding summary line'
                 self.upload_summary_to_mongo(coord)
                 self.expire_trip(coord.bus_id)
-                print 'Finished'
+                print 'Finished with coordinate: %s'\
+                % (coord)
         else:
             """
             First check if we are starting a trip
@@ -137,7 +166,11 @@ class CheckCoordinate(object):
                 """
                 trip_id = self.find_trip_id(coord)
                 self.add_to_queue(coord, trip_id)
-                print 'Adding trip to queue'
+                print 'Adding trip %s to queue for coord %s'\
+                % (trip_id, str(coord))
+            else:
+                print 'Not starting a trip for coordinate: %s'\
+                % (str(coord))
     
     def find_trip_id(self, coord):
         """
@@ -148,7 +181,9 @@ class CheckCoordinate(object):
             
             Logic:
                 - find the first time that satisfies the following:
-                    * y - 120 < x and y_id is not in the queue of known buses 
+                    * y - 120 < x and y_id is not in the queue of known buses
+        TODO: 
+            Something is broken here
         """
         passive_trips = self.active_bus_to_trip_id.keys() 
         all_trips = self.trip_to_dep_arr_times.keys()
@@ -158,14 +193,20 @@ class CheckCoordinate(object):
         #     awesomeness earlier
         for trip_id in outstanding_trips:
             (dep, arr) = self.trip_to_dep_arr_times[trip_id]
-            cur_time = coord.cur_time
+            # Using the starting time, because we only know that a trip started
+            #    after the fact
+            start_time = self.cand_bus_id_to_time_gps[coord.bus_id][0]
+#            cur_time = coord.cur_time
             # Now, we need to convert the schedule time into epoch time today
             # Same ole....
             # Note: we should store this, so not to have to do this every time
             dep_epoch = self.convert_time(dep)
             # Allowing buses leave up to 2 minutes early
-            if dep_epoch - 120 < cur_time:
+            if dep_epoch - 120 < start_time:
                 return trip_id
+        
+        print 'No trip found for coordinate: %s'\
+        % (str(coord))
     
     def expire_trip(self, bus_id):
         """
@@ -188,8 +229,11 @@ class CheckCoordinate(object):
         if coord.bus_id in self.set_active_bus_ids:
             return False
         else:
+            start_time = self.cand_bus_id_to_time_gps[coord.bus_id][0]
             self.set_active_bus_ids.add(coord.bus_id)
-            self.active_bus_to_trip_id[coord.bus_id] = [trip_id, time.time()]
+            self.active_bus_to_trip_id[coord.bus_id] = [trip_id, start_time]
+            # Clear the candidate dictionary
+            del self.cand_bus_id_to_time_gps[coord.bus_id]
             return True
     
     # Helpers
@@ -234,24 +278,33 @@ class CheckCoordinate(object):
         Then, the quesiton of how to hash the coordinates and pull them out 
             again. For now, we are gonna hack it with hardcoded values for the 
             '22'.
+            
+        New attempt:
+        - create a list of candidates
+        - if 
         """
-        (lat, lon) = (37.76048, -122.38895)
-        if coord.speed != 0\
-         and lat-0.001 < coord.float_lat < lat+0.001\
-         and lon-0.001 < coord.float_lon < lon+0.001:
-            return True
+        if coord.bus_id in self.cand_bus_id_to_time_gps:
+            start_time, [lat, lon] = self.cand_bus_id_to_time_gps[coord.bus_id]
+            if self.distance(lat, lon, coord.float_lat, coord.float_lon) > 0.0005:
+                return True
         else:
-            return False
+            (lat, lon) = (37.76048, -122.38895)
+            if lat-0.001 < coord.float_lat < lat+0.001\
+             and lon-0.001 < coord.float_lon < lon+0.001:
+                self.cand_bus_id_to_time_gps[coord.bus_id] =\
+                [time.time(), [coord.float_lat, coord.float_lon]]
+                return False
+        
+    def distance(self, lat1, lon1, lat2, lon2):
+        return math.sqrt((lat1-lat2)**2+(lon1-lon2)**2)
         
     def upload_summary_to_mongo(self, coord):
         # need to define
-        start_time = ''
         (trip_id, start_time) = self.active_bus_to_trip_id[coord.bus_id]
         (schd_start, schd_end) = self.trip_to_dep_arr_times[trip_id]
         schd_start = self.convert_time(schd_start)
         schd_end = self.convert_time(schd_end)
         end_time = time.time()
-#        out = Output()
         out = Output(coord.route,
                      trip_id,
                      coord.bus_id,
@@ -262,51 +315,20 @@ class CheckCoordinate(object):
                      schd_end,
                      start_time-schd_start
                      )
-        print out
-        """
-            def __init__(self, 
-                 route_name,
-                 trip_id,
-                 bus_id,
-                 start_time,
-                 end_time,
-                 secs_late,
-                 schd_start,
-                 schd_end,
-                 leaving_late
-                 ):
-        
-        
-        
-                self.route = a_route
-        self.cur_time = a_cur_time
-        self.bus_id = a_bus_id
-        self.float_lat = a_float_lat
-        self.float_lon = a_float_lon
-        self.dir_tag = a_dir_tag
-        self.speed = a_speed
-        
-            def to_mongo(self):
-        row = {"route_name" :self.route_name,
-               "trip_id": self.trip_id,
-               "bus_id" : self.bus_id,
-               "start_time": self.start_time,
-               "end_time": self.end_time,
-               "secs_late" : self.secs_late,
-               "schd_start": self.schd_start,
-               "schd_end" : self.schd_end,
-               "leaving_late" : self.leaving_late,
-               }
-        return row
-        """
+        conn = mongodb_connector.connect_to_mongo()
+        db = conn.muni
+        summary_new = db.summary_new
+        summary_new.insert(out.to_mongo())
 
 def tests():
     co = CheckCoordinate()
     first_coord = Coordinates(time.time(), 5432, 37.76048, -122.38895, "22_IB2", "22", '20.988')
+    second_coord = Coordinates(time.time(), 5432, 37.761826,-122.388983, "22_IB2", "22", '20.988')
     last_coord = Coordinates(time.time(), 5432, 37.80241, -122.4364, "22_IB2", "22", '10.988')
     co.setup_dicts()
     co.setup_trips_to_end_points()
     co.check_point(first_coord)
+    co.check_point(second_coord)
     co.check_point(last_coord)
     """
     Then throw a point which is almost finished in a few seconds for same
