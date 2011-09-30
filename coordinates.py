@@ -4,11 +4,11 @@ Created on Mar 4, 2011
 @author: shirchen
 '''
 import datetime
+import math
 import time
 from schedule import schedule_pull
 from analyze_data import Output
 from gps import mongodb_connector
-import math
 
 class Coordinates():
     
@@ -188,9 +188,12 @@ class CheckCoordinate(object):
         passive_trips = self.active_bus_to_trip_id.keys() 
         all_trips = self.trip_to_dep_arr_times.keys()
         outstanding_trips = list(set(all_trips).difference(set(passive_trips)))
-        
         # sort these by time, assuming we already took care of 25:00:00
         #     awesomeness earlier
+        outstanding_trips = sorted(outstanding_trips,
+                key=lambda trip_id: self.trip_to_dep_arr_times[trip_id])
+        
+        
         for trip_id in outstanding_trips:
             (dep, arr) = self.trip_to_dep_arr_times[trip_id]
             # Using the starting time, because we only know that a trip started
