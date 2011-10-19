@@ -24,8 +24,11 @@ class Schedule_Pull(object):
         self.mysql_password = None
         self.psql_password = None
         self.route_name = route_name
-        self.to_log = True
+        self.to_log = False
         self.trips = defaultdict(list)
+        LOG_FILENAME = '/tmp/Muni.out'
+        logging.basicConfig(filename=LOG_FILENAME,level=logging.INFO)
+
     
     def setup_route_info(self):
         if self.route_name == '22':
@@ -104,6 +107,9 @@ class Schedule_Pull(object):
                                                d_sec])
             trip_id = row[1]
             self.trips[trip_id].append(departure_time)
+        for trip_id in self.trips.keys():
+            if len(self.trips[trip_id]) < 2:
+                del self.trips[trip_id]
         if self.to_log:
             print self.trips
         return self.trips

@@ -63,11 +63,11 @@ class Output(object):
      % (self.route_name,
          self.trip_id,
          self.bus_id,
-         self.start_time,
-         self.end_time,
+         time.ctime(self.start_time),
+         time.ctime(self.end_time),
          self.secs_late,
-         self.schd_start,
-         self.schd_end,
+         time.ctime(self.schd_start),
+         time.ctime(self.schd_end),
          self.leaving_late)
         
     def to_mongo(self):

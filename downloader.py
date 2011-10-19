@@ -52,7 +52,11 @@ class Downloader(MuniMain):
         http = httplib2.Http("")
         try:
             http_resp, content = http.request(http_location_call, "GET")
-            self.parse_location_data(content)
+            if http_resp['status'] == '200':
+                self.parse_location_data(content)
+            else:
+                print 'Response not 200'
+                logging.info('Response not 200')
 
         except Exception, e:
             print 'Could not make call %s, got exception: %s' % (http_location_call, str(e))
@@ -136,6 +140,26 @@ class Downloader(MuniMain):
                        "dir": coord.dir_tag,
                        "speed": coord.speed}
         location.insert(coordinate)
+        
+    def tests(self):
+        h = httplib2.Http("")
+        resp, content = h.request("http://ec2-50-18-72-59.us-west-1.compute.amazonaws.com:3000/test_xml_first.xml", "GET")
+        if resp['status'] == '200':
+            self.parse_location_data(content)
+        else:
+            print 'Response not 200 for first'
+            
+        resp, content = h.request("http://ec2-50-18-72-59.us-west-1.compute.amazonaws.com:3000/test_xml_second.xml", "GET")
+        if resp['status'] == '200':
+            self.parse_location_data(content)
+        else:
+            print 'Response not 200 for second'
+            
+        resp, content = h.request("http://ec2-50-18-72-59.us-west-1.compute.amazonaws.com:3000/test_xml_last.xml", "GET")
+        if resp['status'] == '200':
+            self.parse_location_data(content)
+        else:
+            print 'Response not 200 for last'
 
 # Helpers
 def usage():
@@ -150,9 +174,9 @@ if __name__=="__main__":
     LOG_FILENAME = '/tmp/Muni.out'
     logging.basicConfig(filename=LOG_FILENAME,level=logging.INFO)
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hlp:r:t:v",
+        opts, args = getopt.getopt(sys.argv[1:], "hlp:r:t:uv",
                                     ["help", "logging", "period=", "route=",
-                                      "time="])
+                                      "time=", "unittest"])
     except getopt.GetoptError, err:
         # print help information and exit:
         print "Error: " + str(err) # will print something like "option -a not recognized"
@@ -162,6 +186,7 @@ if __name__=="__main__":
     verbose = False
     continuous = False
     to_log = False
+    unit_test = False
     num_hours_to_collect = 0
     time_at_start = time.time()
     for o, a in opts:
@@ -179,20 +204,25 @@ if __name__=="__main__":
         elif o in ("-t", "--time"):
             int_interval = int(a)
             continuous = True
+        elif o in ("-u", "--unittest"):
+            unit_test = True
         else:
             assert False, "unhandled option"
     muniDownloader = Downloader(route)
     muniDownloader.logging = to_log
-    if continuous and num_hours_to_collect == 0:
-        while 1:
-            muniDownloader.download_location()
-            time.sleep(int_interval)
-    elif num_hours_to_collect > 0:
-        num_secs_to_collect = num_hours_to_collect * 3600
-        stoppage_time = time_at_start+num_secs_to_collect
-        print "Collecting until %s" % (time.ctime(stoppage_time))
-        while time.time() < stoppage_time:
-            muniDownloader.download_location()
-            time.sleep(int_interval)
+    if unit_test:
+        muniDownloader.tests()
     else:
-        muniDownloader.download_location()
+        if continuous and num_hours_to_collect == 0:
+            while 1:
+                muniDownloader.download_location()
+                time.sleep(int_interval)
+        elif num_hours_to_collect > 0:
+            num_secs_to_collect = num_hours_to_collect * 3600
+            stoppage_time = time_at_start+num_secs_to_collect
+            print "Collecting until %s" % (time.ctime(stoppage_time))
+            while time.time() < stoppage_time:
+                muniDownloader.download_location()
+                time.sleep(int_interval)
+        else:
+            muniDownloader.download_location()
