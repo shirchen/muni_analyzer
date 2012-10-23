@@ -190,15 +190,13 @@ if __name__=="__main__":
     num_hours_to_collect = 0
     time_at_start = time.time()
     for o, a in opts:
-        if o == "-v":
-            verbose = True
-        elif o in ("-h", "--help"):
-#            usage()
+        if o in ("-h", "--help"):
+            usage()
             sys.exit()
-        elif o in ("-p", "--period"):
-            num_hours_to_collect = float(a)    
         elif o in ("-l", "--logging"):
             to_log = True
+        elif o in ("-p", "--period"):
+            num_hours_to_collect = float(a)    
         elif o in ("-r", "--route"):
             route = a
         elif o in ("-t", "--time"):
@@ -206,12 +204,15 @@ if __name__=="__main__":
             continuous = True
         elif o in ("-u", "--unittest"):
             unit_test = True
+        elif o == "-v":
+            verbose = True
         else:
             assert False, "unhandled option"
-    muniDownloader = Downloader(route)
-    muniDownloader.logging = to_log
+
+    muni_downloader = Downloader(route)
+    muni_downloader.logging = to_log
     if unit_test:
-        muniDownloader.tests()
+        muni_downloader.tests()
     else:
         if continuous and num_hours_to_collect == 0:
             while 1:
@@ -225,4 +226,4 @@ if __name__=="__main__":
                 muniDownloader.download_location()
                 time.sleep(int_interval)
         else:
-            muniDownloader.download_location()
+            muni_downloader.download_location()
